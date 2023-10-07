@@ -37,12 +37,12 @@ CREATE EXTERNAL TABLE std3_47.price_ext
 	price numeric(8, 2)
 )
 LOCATION (
-	'gpfdist://192.168.0.124:8080/price.csv'
+	'gpfdist://172.16.128.34:8080/price.csv'
 )
 ON ALL
 FORMAT 'CSV' ( DELIMITER ';' NULL '' ESCAPE '"' QUOTE '"')
 ENCODING 'UTF8'
-SEGMENT REJECT LIMIT 5 ROWS;
+SEGMENT REJECT LIMIT 10 ROWS;
 
 -- chanel
 CREATE EXTERNAL TABLE std3_47.chanel_ext
@@ -53,7 +53,7 @@ CREATE EXTERNAL TABLE std3_47.chanel_ext
 	price numeric(8, 2)
 )
 LOCATION (
-	'gpfdist://192.168.0.124:8080/chanel.csv'
+	'gpfdist://172.16.128.34:8080/chanel.csv'
 )
 ON ALL
 FORMAT 'CSV' ( DELIMITER ';' NULL '' ESCAPE '"' QUOTE '"')
@@ -69,7 +69,7 @@ CREATE EXTERNAL TABLE std3_47.product_ext
 	price numeric(8, 2)
 )
 LOCATION (
-	'gpfdist://192.168.0.124:8080/product.csv'
+	'gpfdist://172.16.128.34:8080/product.csv'
 )
 ON ALL
 FORMAT 'CSV' ( DELIMITER ';' NULL '' ESCAPE '"' QUOTE '"')
@@ -85,9 +85,14 @@ CREATE EXTERNAL TABLE std3_47.region_ext
 	price numeric(8, 2)
 )
 LOCATION (
-	'gpfdist://192.168.0.124:8080/region.csv'
+	'gpfdist://172.16.128.34:8080/region.csv'
 )
 ON ALL
 FORMAT 'CSV' ( DELIMITER ';' NULL '' ESCAPE '"' QUOTE '"')
 ENCODING 'UTF8'
 SEGMENT REJECT LIMIT 5 ROWS;
+
+DROP EXTERNAL TABLE std3_47.chanel_ext;
+DROP EXTERNAL TABLE std3_47.price_ext;
+DROP EXTERNAL TABLE std3_47.region_ext;
+DROP EXTERNAL TABLE std3_47.product_ext;
