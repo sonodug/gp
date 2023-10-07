@@ -115,6 +115,59 @@ END;
 $$
 EXECUTE ON ANY;
 
+-- Switch partition
+CREATE OR REPLACE FUNCTION std3_47.switch_partition(p_table_name TEXT, p_partition_value timestamp, p_switch_table_name TEXT)
+	RETURNS void
+	LANGUAGE plpgsql
+	VOLATILE
+AS $$
+DECLARE
+	v_rank TEXT; -- ?
+BEGIN
+	EXECUTE 'ALTER TABLE '||v_table_name||' EXCHANGE PARTITION FOR (RANK('||TO_CHAR(v_rank, '999999999')||')) WITH TABLE '||v_switch_table_name||' WITH VALIDATION;';
+END;
+$$
+EXECUTE ON ANY;
+
+-- Create date partitions
+CREATE OR REPLACE FUNCTION std3_47.f_create_date_partition(p_table_name TEXT, p_partition_value timestamp)
+	RETURNS int8
+	LANGUAGE plpgsql
+	VOLATILE
+AS $$
+DECLARE
+	v_cnt_partitions int;
+	v_table_name TEXT;
+	v_partition_end_sql TEXT;
+	v_partition_end timestamp;
+	v_interval INTERVAL;
+	v_ts_format TEXT := 'YYYY-MM-DD HH24:MI:SS'
+BEGIN
+	v_table_name = std3_47.unify_name(p_table_name);
+	-- Check having table partition
+	SELECT count(*) INTO v_cnt_partitions FROM pg_partition p WHERE p.schemaname||'.'||p.tablename = lower(v_table_name);
+	IF v_cnt_partitions > 1 THEN
+		LOOP
+			SELECT partitionrangeend INTO v_partition_end_sql
+				FROM (
+					SELECT p.*, RANK() OVER (ORDER BY partitionrank DESC) rnk FROM pg_partition p
+					WHERE p.partitionrank IS NOT NULL AND p.schemaname||'.'||p.tablename = lower(v_table_name)
+					) q
+				WHERE rnk = 1;
+			-- Last partition end date
+			EXECUTE 'SELECT '||v_partition_end_sql INTO v_partition_end;
+			-- If partition already exists for input value, then exit from function
+			EXIT WHEN v_partition_end > p_partition_value;
+			v_interval := '1 month'::INTERVAL;
+			-- Cut new partition from default partition, if it is not exist
+			EXECUTE 'ALTER TABLE '||v_table_name||' SPLIT DEFAULT PARTITION
+					START ('||v_partition_end_sql||') END ('''||to_char(v_partition_end+v_interval, v_ts_format)||'''::timestamp)'; 
+		END LOOP;
+	END IF;
+END;
+$$
+EXECUTE ON ANY;
+
 -- CHANGING GUIDE TABLE
 
 -- ELT FULL
@@ -190,7 +243,8 @@ EXECUTE ON ANY;
 -- CHANGING FACT TABLE
 
 -- ELT DELTA PARTITION
-CREATE OR REPLACE FUNCTION std3_47.f_load_delta_partitions(p_table_from_name TEXT, p_table_to_name TEXT, p_partition_key TEXT, p_schema_name TEXT, p_start_date timestamp, p_end_date timestamp)
+CREATE OR REPLACE FUNCTION std3_47.f_load_delta_partitions(p_table_from_name TEXT, p_table_to_name TEXT, p_partition_key TEXT, 
+															p_schema_name TEXT, p_start_date timestamp, p_end_date timestamp)
 	RETURNS int8
 	LANGUAGE plpgsql
 	SECURITY DEFINER
