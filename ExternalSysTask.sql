@@ -3,7 +3,7 @@
 CREATE EXTERNAL TABLE std3_47.plan_ext (
 	"date" date,
 	region text,
-	matdirec int4,
+	matdirec text,
 	quantity int4,
 	distr_chan int4
 )
@@ -11,6 +11,9 @@ LOCATION ('pxf://gp.plan?PROFILE=Jdbc&JDBC_DRIVER=org.postgresql.Driver&DB_URL=j
 ON ALL
 FORMAT 'CUSTOM' ( FORMATTER='pxfwritable_import' )
 ENCODING 'UTF8';
+
+INSERT INTO std3_47.plan
+SELECT * FROM std3_47.plan_ext;
 
 CREATE EXTERNAL TABLE std3_47.sales_ext (
 	"date" date,
@@ -25,6 +28,9 @@ LOCATION ('pxf://gp.sales?PROFILE=Jdbc&JDBC_DRIVER=org.postgresql.Driver&DB_URL=
 ON ALL
 FORMAT 'CUSTOM' ( FORMATTER='pxfwritable_import' )
 ENCODING 'UTF8';
+
+DROP EXTERNAL TABLE std3_47.plan_ext;
+DROP EXTERNAL TABLE std3_47.sales_ext;
 
 -- 2. Create external tables based CSV local file with GPFDIST
 

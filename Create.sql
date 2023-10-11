@@ -9,7 +9,7 @@ create table std3_47.plan
 (
 	"date" date NOT NULL,
 	region text NOT NULL,
-	matdirec int4 NOT NULL,
+	matdirec text NOT NULL,
 	quantity int4 NOT NULL,
 	distr_chan int4 NOT NULL
 )

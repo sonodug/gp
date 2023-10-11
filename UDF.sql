@@ -219,57 +219,67 @@ BEGIN
 	v_load_interval = '1 month'::INTERVAL;
 	v_start_date := date_trunc('month', to_date(p_month, 'YYYYMM'));
 	v_end_date := date_trunc('month', to_date(p_month, 'YYYYMM')) + v_load_interval;
-	EXECUTE 'drop view if exists std3_47.plan_fact';
-	EXECUTE 'drop table if exists '||v_table_name;
+	EXECUTE 'DROP VIEW IF EXISTS std3_47.plan_fact';
+	EXECUTE 'DROP TABLE IF EXISTS '||v_table_name;  
 
 
-	v_sql = 'create table '||v_table_name||' (region varchar(20), matdirec varchar(20), distr_chan varchar(100), planed_quantity int4,
-											  real_quantity int4, percentage_completed int4, material varchar(20))
-	with (
+	v_sql = 'CREATE TABLE '||v_table_name||' (region_code text, matdirec_code text, distr_chanel int4, planned_quantity int4,
+											  real_quantity int4, complete_percent int4, mosteff_material text)
+	WITH (
 		appendonly=true,
 		orientation=column,
 		compresstype=zstd,
 		compresslevel=1
 	)
-	distributed by (distr_chan);';
+	DISTRIBUTED BY (distr_chanel);';
 
 	RAISE NOTICE 'TABLE IS: %', v_sql;
 	EXECUTE v_sql;
-	v_sql = ' with total_product as (select s.material, s.region, sum(s.quantity) as total
-		from std3_47.sales s 
-		where s."date" between '''||v_start_date||''' and '''||v_end_date||''' 
-		group by s.region, s.material) , 
-	total_region as (
-		select p.region, p.matdirec, p.distr_chan, sum(p.quantity) as planned_quantity, sum(s.quantity) as real_quantity, 
-			((sum(s.quantity) * 100)/sum(p.quantity)) as percentage_completed
-		from std3_47.sales s join std3_47.plan p on (s.region = p.region and s."date" = p."date" and s.distr_chan = p.distr_chan) 
-			join total_product tp on (tp.material = s.material and tp.region = s.region)
-		where p."date" between '''||v_start_date||''' and '''||v_end_date||'''
-		group by p.region, p.matdirec, p.distr_chan),
-	max_qnt as (select tp.region, max(tp.total) as max_quantity
-		from total_product tp 
-		group by tp.region)
-	insert into '||v_table_name||' (region, matdirec, distr_chan, planed_quantity, real_quantity, percentage_completed, material)
-		select tr.region, tr.matdirec, tr.distr_chan, planned_quantity, real_quantity, percentage_completed, tp.material
-		from total_region tr join total_product tp on tp.region = tr.region join max_qnt mq on mq.region = tr.region 
-		where mq.max_quantity = tp.total;';
-	RAISE NOTICE 'TABLE IS: %', v_sql;
+	
+	v_sql = 'WITH total AS (
+		SELECT s.material, s.region, sum(s.quantity) AS quantity_day
+		FROM std3_47.sales s
+		WHERE s."date" BETWEEN '''||v_start_date||''' AND '''||v_end_date||'''
+		GROUP BY s.region, s.material
+	), quantity_info_comp AS (
+		SELECT p.region, p.matdirec, p.distr_chan, sum(p.quantity) AS planned_quantity, sum(s.quantity) AS real_quantity, ((sum(s.quantity) * 100)/sum(p.quantity)) AS complete_percent
+		FROM std3_47.sales s
+		JOIN std3_47.plan p ON s.region = p.region AND s."date" = p."date" AND s.distr_chan = p.distr_chan
+		JOIN total t ON t.material = s.material AND t.region = s.region
+		WHERE p."date" BETWEEN '''||v_start_date||''' AND '''||v_end_date||'''
+		GROUP BY p.region, p.matdirec, p.distr_chan
+	), quantity_info_max AS (
+		SELECT t.region, max(t.quantity_day) AS max_quantity
+		FROM total t
+		GROUP BY t.region
+	)
+	INSERT INTO '||v_table_name||' (region_code, matdirec_code, distr_chanel, planned_quantity, real_quantity, complete_percent, mosteff_material)
+	SELECT qic.region, qic.matdirec, qic.distr_chan, qic.planned_quantity, qic.real_quantity, qic.complete_percent, t.material
+	FROM quantity_info_comp qic
+	JOIN total t ON t.region = qic.region
+	JOIN quantity_info_max qim ON qim.region = qic.region
+	WHERE qim.max_quantity = t.quantity_day;';
+	
+	RAISE NOTICE 'INSERT SQL IS: %', v_sql;
 
 	EXECUTE v_sql;
 
 	v_sql = 'CREATE VIEW std3_47.v_plan_fact AS
-	SELECT p.region, p.matdirec, p.distr_chan, p.planed_quantity, p.real_quantity, p.percentage_completed, p.material, pr.brand, pr.txt, pc.price
-	from '||v_table_name||' p join std3_47.product pr on p.material = pr.material join std3_47.price pc on pc.material = p.material;
-	';
+	SELECT p.region_code, p.matdirec_code, p.distr_chanel, p.planned_quantity, p.real_quantity, p.complete_percent, p.mosteff_material, pr.brand, pr.txt, pc.price
+	FROM '||v_table_name||' p
+	JOIN std3_47.product pr ON p.mosteff_material = pr.material
+	JOIN std3_47.price pc on pc.material = p.mosteff_material;';
+
+	RAISE NOTICE 'VIEW IS: %', v_sql;
 	EXECUTE v_sql;
 
 	EXECUTE 'SELECT COUNT(1) FROM '||v_table_name INTO v_return;
 
 
-	PERFORM std3_76.f_load_write_log(p_log_type := 'INFO',
+	PERFORM std3_47.f_load_write_log(p_log_type := 'INFO',
 									 p_log_message := v_return ||' rows inserted',
 									 p_location := 'Sales plan calculation');
-	PERFORM std3_76.f_load_write_log(p_log_type := 'INFO',
+	PERFORM std3_47.f_load_write_log(p_log_type := 'INFO',
 									 p_log_message := 'End f_calculate_plan_mart',
 									 p_location := 'Sales plan calculation');
 	RETURN v_return;
@@ -278,6 +288,7 @@ $$
 EXECUTE ON ANY;
 --
 
+--
 DROP FUNCTION std3_47.f_load_full(TEXT, TEXT);
 DROP FUNCTION std3_47.f_load_simple_partition(TEXT, TEXT, timestamp, timestamp, TEXT, TEXT, TEXT);
 DROP FUNCTION std3_47.f_calculate_plan_mart(varchar);
@@ -291,6 +302,9 @@ SELECT std3_47.f_load_full('std3_47.region', 'region');
 -- Delta partition load to fact table
 SELECT std3_47.f_load_simple_partition('std3_47.sales', '"date"', '2021-01-02', '2021-07-27', 'gp.sales', 'intern', 'intern');
 SELECT * FROM std3_47.sales;
+
+-- Calc mart
+SELECT std3_47.f_calculate_plan_mart('202105');
 
 -- Create logs table
 CREATE TABLE std3_47.logs (
@@ -311,5 +325,5 @@ CREATE SEQUENCE std3_47.log_id_seq
 	MINVALUE 1
 	MAXVALUE 2147483647
 	START 1;
-
-
+	
+SELECT * FROM logs;
