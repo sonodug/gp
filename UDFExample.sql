@@ -287,6 +287,46 @@ END;
 $$
 EXECUTE ON ANY;
 
+-- ELT DELTA UPSERT
+CREATE OR REPLACE FUNCTION std3_47.f_delta_upsert_table(p_table_from_name TEXT, p_table_to_name TEXT, p_merge_key TEXT)
+	RETURNS int8
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	VOLATILE
+AS $$
+
+DECLARE
+	v_table_from_name TEXT;
+	v_table_to_name TEXT;
+	v_delete_query TEXT;
+	v_insert_query TEXT;
+	v_cnt;
+	v_table_cols TEXT;
+BEGIN
+	-- DELETE + INSERT from p_table_from_name to table p_table_to_name using 'merge key'
+	-- 1. Delete all rows in main table, that same in source table
+	-- 2. Insert all rows from source to main table
+	v_table_from_name = scheme_name.f_unify_name(p_name := p_table_from_name);
+	v_table_to_name = scheme_name.f_unify_name(p_name := p_table_to_name);
+
+	-- select all columns from main table
+	SELECT string_agg(column_name, ',', ORDER BY ordinal_position) INTO v_table_cols
+	FROM information_schema.columns
+	WHERE table_schema||'.'||table_name = v_table_to_name;
+
+	-- Script for delete rows in main table
+	SELECT (DELETE FROM v_table_to_name USING v_table_from_name
+	WHERE v_table_from_name.p_merge_key IS NOT DISTINCT FROM v_table_to_name.p_merge_key)
+	INTO v_delete_query;
+	EXECUTE v_delete_query;
+	GET DIAGNOSTICS v_cnt = ROW_COUNT;
+	RAISE NOTICE 'Table % was updated successfully. % rows deleted.', p_table_to_name, v_cnt;
+	
+	v_insert_query = 'SELECT '||v_table_cols||' FROM (SELECT * FROM v_table_from_name)';
+END;
+$$
+EXECUTE ON ANY;
+
 
 
 

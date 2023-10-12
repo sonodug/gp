@@ -126,6 +126,97 @@ END;
 $$
 EXECUTE ON ANY;
 --
+
+CREATE OR REPLACE FUNCTION std3_47.f_simple_upsert(p_pxf_source_table TEXT, p_table_to_name TEXT, p_merge_key TEXT, p_user_id TEXT, p_pass TEXT)
+	RETURNS int8
+	LANGUAGE plpgsql
+	SECURITY DEFINER
+	VOLATILE
+AS $$
+
+DECLARE
+	v_table_from_name TEXT;
+	v_table_to_name TEXT;
+	v_delete_query TEXT;
+	v_insert_query TEXT;
+	v_cnt int8;
+	v_table_cols TEXT;
+	v_sql TEXT;
+	v_pxf TEXT;
+BEGIN
+	v_table_from_name = p_table_to_name||'_ext';
+
+	EXECUTE 'DROP EXTERNAL TABLE IF EXISTS '||v_table_from_name;
+
+	v_pxf = 'pxf://'||p_pxf_source_table||'?PROFILE=Jdbc&JDBC_DRIVER=org.postgresql.Driver&DB_URL=jdbc:postgresql://192.168.214.212:5432/postgres&USER='||p_user_id||'&PASS='||p_pass;
+	
+	RAISE NOTICE 'PXF CONNECTION STRING: %', v_pxf;
+
+	v_sql = 'CREATE EXTERNAL TABLE '||v_table_from_name||'(LIKE '||p_table_to_name||')
+			 LOCATION ('''||v_pxf||'''
+			 ) ON ALL
+			 FORMAT ''CUSTOM'' (FORMATTER=''pxfwritable_import'')
+			 ENCODING ''UTF8''';
+
+	RAISE NOTICE 'EXTERNAL TABLE IS: %', v_sql;
+	EXECUTE v_sql;
+
+	-- select all columns from main table
+	SELECT string_agg(column_name, ',' ORDER BY ordinal_position) INTO v_table_cols
+	FROM information_schema.columns
+	WHERE table_schema||'.'||table_name = v_table_to_name;
+
+	-- Script for delete rows in main table
+	v_delete_query = 'DELETE FROM '||v_table_to_name||' USING '||v_table_from_name||'
+	WHERE '||v_table_from_name||'.'||p_merge_key||' IS NOT DISTINCT FROM '||v_table_to_name||'.'||p_merge_key||'';
+	
+	EXECUTE v_delete_query;
+	GET DIAGNOSTICS v_cnt = ROW_COUNT;
+	RAISE NOTICE 'Table % was updated successfully. % rows deleted.', p_table_to_name, v_cnt;
+	
+	v_insert_query = 'INSERT INTO '||v_table_to_name||' SELECT '||v_table_cols||' FROM (SELECT * FROM v_table_from_name)';
+	EXECUTE v_insert_query;
+	GET DIAGNOSTICS v_cnt = ROW_COUNT;
+	RAISE NOTICE 'INSERTED ROWS: %', v_cnt;
+END;
+$$
+EXECUTE ON ANY;
+
+
+--
+CREATE OR REPLACE FUNCTION std3_47.f_load_full(p_table TEXT, p_file_name text)
+	RETURNS int4
+	LANGUAGE plpgsql
+	VOLATILE
+AS $$
+DECLARE
+	v_ext_table_name TEXT;
+	v_sql TEXT;
+	v_gpfdist TEXT;
+	v_result int;
+BEGIN
+	v_ext_table_name = p_table||'_ext';
+	EXECUTE 'TRUNCATE TABLE '||p_table;
+	EXECUTE 'DROP EXTERNAL TABLE IF EXISTS '||v_ext_table_name;
+
+	v_gpfdist = 'gpfdist://172.16.128.34:8080/'||p_file_name||'.csv';
+
+	v_sql = 'CREATE EXTERNAL TABLE '||v_ext_table_name||'(LIKE '||p_table||')
+			 LOCATION ('''||v_gpfdist||'''
+			 ) ON ALL
+			 FORMAT ''CSV'' ( HEADER DELIMITER '';'' NULL '''' ESCAPE ''"'' QUOTE ''"'' )
+			 ENCODING ''UTF8''';
+	
+	RAISE NOTICE 'EXTERNAL TABLE IS: %', v_sql;
+	EXECUTE v_sql;
+	EXECUTE 'INSERT INTO '||p_table||' SELECT * FROM '||v_ext_table_name;
+	EXECUTE 'SELECT COUNT(1) FROM '||p_table INTO v_result;
+	RETURN v_result;
+END;
+$$
+EXECUTE ON ANY;
+
+--
 CREATE OR REPLACE FUNCTION std3_47.f_load_write_log(p_log_type TEXT, p_log_message TEXT, p_location TEXT)
 	RETURNS void
 	LANGUAGE plpgsql
