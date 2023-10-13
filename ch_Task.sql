@@ -14,7 +14,7 @@ ENGINE = PostgreSQL('192.168.214.203:5432', 'adb', 'plan_fact_202101', 'std3_47'
 -- Create dicts
 CREATE DICTIONARY std3_47.ch_price_dict
 (
-	`material` Nullable(String),
+	`material` String,
 	`region` Nullable(String),
 	`distr_chan` Nullable(String),
 	`price` Nullable(Decimal(8, 2))
@@ -86,3 +86,11 @@ SELECT * FROM std3_47.ch_plan_fact_ext;
 
 SELECT * FROM std3_47.ch_plan_fact_distr;
 SELECT * FROM std3_47.ch_plan_fact;
+
+
+SELECT p.region_code, p.matdirec_code, p.distr_chanel, p.planned_quantity, p.real_quantity, p.complete_percent, p.mosteff_material, pr.brand, pr.txt, pc.price
+FROM std3_47.ch_plan_fact_ext p
+JOIN std3_47.ch_product_dict pr ON p.mosteff_material = pr.material
+JOIN std3_47.ch_price_dict pc ON pc.material = p.mosteff_material;
+
+SELECT dictGet(std3_47.ch_product_dict, ('asgrp', 'brand'), '463915');
