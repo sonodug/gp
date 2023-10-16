@@ -13,10 +13,10 @@ DISTRIBUTED REPLICATED;
 
 -- traffic
 CREATE TABLE std3_47.traffic (
-	plant text NULL,
+	plant bpchar(4) NULL,
 	"date" date NULL,
-	"time" text NULL,
-	frame_id text NULL,
+	"time" bpchar(6) NULL,
+	frame_id bpchar(10) NULL,
 	quantity int4 NULL
 )
 WITH (
@@ -30,7 +30,7 @@ DISTRIBUTED BY (plant, frame_id);
 -- bills_head
 CREATE TABLE std3_47.bills_head (
 	billnum int8 NULL,
-	plant text NULL,
+	plant bpchar(4) NULL,
 	calday date NULL
 )
 WITH (
@@ -120,3 +120,17 @@ SELECT gp_segment_id, count(*)
 FROM std3_47.bills_item
 GROUP BY 1
 ORDER BY gp_segment_id;
+
+-- Optional drop
+DROP TABLE IF EXISTS std3_47.stores;
+DROP TABLE IF EXISTS std3_47.traffic;
+DROP TABLE IF EXISTS std3_47.bills_head;
+DROP TABLE IF EXISTS std3_47.bills_item;
+DROP TABLE IF EXISTS std3_47.coupons;
+DROP TABLE IF EXISTS std3_47.promos;
+DROP TABLE IF EXISTS std3_47.promo_types;
+
+-- Distribution selection
+-- promos, promo_types, stores - replicated (ref_tables)
+-- traffic (randomly или by first attr)
+-- остальное - row
