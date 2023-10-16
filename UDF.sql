@@ -1,36 +1,3 @@
-CREATE OR REPLACE FUNCTION std3_47.f_load_full(p_table TEXT, p_file_name text)
-	RETURNS int4
-	LANGUAGE plpgsql
-	VOLATILE
-AS $$
-DECLARE
-	v_ext_table_name TEXT;
-	v_sql TEXT;
-	v_gpfdist TEXT;
-	v_result int;
-BEGIN
-	v_ext_table_name = p_table||'_ext';
-	EXECUTE 'TRUNCATE TABLE '||p_table;
-	EXECUTE 'DROP EXTERNAL TABLE IF EXISTS '||v_ext_table_name;
-
-	v_gpfdist = 'gpfdist://172.16.128.34:8080/'||p_file_name||'.csv';
-
-	v_sql = 'CREATE EXTERNAL TABLE '||v_ext_table_name||'(LIKE '||p_table||')
-			 LOCATION ('''||v_gpfdist||'''
-			 ) ON ALL
-			 FORMAT ''CSV'' ( HEADER DELIMITER '';'' NULL '''' ESCAPE ''"'' QUOTE ''"'' )
-			 ENCODING ''UTF8''';
-	
-	RAISE NOTICE 'EXTERNAL TABLE IS: %', v_sql;
-	EXECUTE v_sql;
-	EXECUTE 'INSERT INTO '||p_table||' SELECT * FROM '||v_ext_table_name;
-	EXECUTE 'SELECT COUNT(1) FROM '||p_table INTO v_result;
-	RETURN v_result;
-END;
-$$
-EXECUTE ON ANY;
-
---
 CREATE OR REPLACE FUNCTION std3_47.f_load_simple_partition(p_table TEXT, p_partition_key TEXT,
 														   p_start_date timestamp, p_end_date timestamp,
 														   p_pxf_table TEXT, p_user_id TEXT, p_pass TEXT)

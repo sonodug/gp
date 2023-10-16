@@ -2,7 +2,7 @@
 
 -- Unify
 CREATE OR REPLACE FUNCTION std3_47.f_unify_name(p_name TEXT)
-	RETURNS int8
+	RETURNS TEXT
 	LANGUAGE plpgsql
 	VOLATILE
 AS $$
