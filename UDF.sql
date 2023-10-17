@@ -75,9 +75,6 @@ BEGIN
 	v_sql = 'INSERT INTO '||v_temp_table||' SELECT * FROM '||v_ext_table||' WHERE '||v_where;
 	EXECUTE v_sql;
 
-	v_sql = 'INSERT INTO '||v_temp_table||' SELECT * FROM '||v_ext_table||' WHERE '||v_where;
-	EXECUTE v_sql;
-
 	GET DIAGNOSTICS v_cnt = ROW_COUNT;
 	RAISE NOTICE 'INSERTED ROWS: %', v_cnt;
 

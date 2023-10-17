@@ -94,7 +94,7 @@ DISTRIBUTED REPLICATED;
 
 -- promo_types
 CREATE TABLE std3_47.promo_types (
-	type_id int4 NOT NULL,
+	type_id text NOT NULL,
 	txt text NOT NULL
 )
 WITH (
@@ -128,6 +128,16 @@ DROP TABLE IF EXISTS std3_47.bills_head;
 DROP TABLE IF EXISTS std3_47.bills_item;
 DROP TABLE IF EXISTS std3_47.coupons;
 DROP TABLE IF EXISTS std3_47.promos;
+DROP TABLE IF EXISTS std3_47.report_model;
+
+DROP TABLE IF EXISTS std3_47.stores;
+DROP TABLE IF EXISTS std3_47.traffic;
+DROP TABLE IF EXISTS std3_47.bills_head;
+DROP TABLE IF EXISTS std3_47.bills_item;
+DROP TABLE IF EXISTS std3_47.coupons;
+DROP TABLE IF EXISTS std3_47.promos;
+
+DROP TABLE IF EXISTS std3_47.promo_types_model;
 DROP TABLE IF EXISTS std3_47.promo_types;
 
 -- Create models
@@ -226,7 +236,7 @@ DISTRIBUTED REPLICATED;
 
 -- promo_types
 CREATE TABLE std3_47.promo_types_model (
-	type_id int4 NOT NULL,
+	type_id text NOT NULL,
 	txt text NOT NULL
 )
 WITH (
