@@ -25,7 +25,13 @@ WITH (
 	compresstype=zstd,
 	compresslevel=1
 )
-DISTRIBUTED RANDOMLY;
+DISTRIBUTED RANDOMLY
+PARTITION BY RANGE("date")
+(
+	START (date '2021-01-01') inclusive
+	END (date '2021-03-01') exclusive
+	every (interval '1 month')
+);
 
 -- bills_head
 CREATE TABLE std3_47.bills_head (
@@ -35,11 +41,17 @@ CREATE TABLE std3_47.bills_head (
 )
 WITH (
 	appendonly=true,
-	orientation=column,
+	orientation=row,
 	compresstype=zstd,
 	compresslevel=1
 )
-DISTRIBUTED BY (billnum);
+DISTRIBUTED BY (billnum)
+PARTITION BY RANGE("calday")
+(
+	START (date '2020-11-01') inclusive
+	END (date '2021-03-01') exclusive
+	every (interval '1 month')
+);
 
 -- bills_item
 CREATE TABLE std3_47.bills_item (
@@ -74,7 +86,7 @@ WITH (
 	compresstype=zstd,
 	compresslevel=1
 )
-DISTRIBUTED REPLICATED;
+DISTRIBUTED RANDOMLY;
 
 -- promos
 CREATE TABLE std3_47.promos (
@@ -123,22 +135,33 @@ ORDER BY gp_segment_id;
 
 -- Optional drop
 DROP TABLE IF EXISTS std3_47.stores;
-DROP TABLE IF EXISTS std3_47.traffic;
 DROP TABLE IF EXISTS std3_47.bills_head;
 DROP TABLE IF EXISTS std3_47.bills_item;
 DROP TABLE IF EXISTS std3_47.coupons;
 DROP TABLE IF EXISTS std3_47.promos;
-DROP TABLE IF EXISTS std3_47.report_model;
+
+DROP TABLE IF EXISTS std3_47.promo_types;
+DROP TABLE IF EXISTS std3_47.promo_types_model;
+
+DROP TABLE IF EXISTS std3_47.traffic;
+DROP TABLE IF EXISTS std3_47.traffic_model;
 
 DROP TABLE IF EXISTS std3_47.stores;
-DROP TABLE IF EXISTS std3_47.traffic;
-DROP TABLE IF EXISTS std3_47.bills_head;
-DROP TABLE IF EXISTS std3_47.bills_item;
-DROP TABLE IF EXISTS std3_47.coupons;
-DROP TABLE IF EXISTS std3_47.promos;
+DROP TABLE IF EXISTS std3_47.stores_model;
 
-DROP TABLE IF EXISTS std3_47.promo_types_model;
-DROP TABLE IF EXISTS std3_47.promo_types;
+DROP TABLE IF EXISTS std3_47.bills_head;
+DROP TABLE IF EXISTS std3_47.bills_head_model;
+
+DROP TABLE IF EXISTS std3_47.bills_item;
+DROP TABLE IF EXISTS std3_47.bills_item_model;
+
+DROP TABLE IF EXISTS std3_47.coupons;
+DROP TABLE IF EXISTS std3_47.coupons_model;
+
+DROP TABLE IF EXISTS std3_47.promos;
+DROP TABLE IF EXISTS std3_47.promos_model;
+
+DROP TABLE IF EXISTS std3_47.report_model;
 
 -- Create models
 CREATE TABLE std3_47.stores_model (
@@ -156,7 +179,7 @@ DISTRIBUTED REPLICATED;
 -- traffic
 CREATE TABLE std3_47.traffic_model (
 	plant bpchar(4) NULL,
-	"date" date NULL,
+	"date" bpchar(10) NULL,
 	"time" bpchar(6) NULL,
 	frame_id bpchar(10) NULL,
 	quantity int4 NULL
@@ -177,7 +200,7 @@ CREATE TABLE std3_47.bills_head_model (
 )
 WITH (
 	appendonly=true,
-	orientation=column,
+	orientation=row,
 	compresstype=zstd,
 	compresslevel=1
 )
@@ -274,3 +297,16 @@ DISTRIBUTED REPLICATED;
 
 SELECT std3_47.f_ensure_templating(ARRAY['std3_47.stores_model', 'std3_47.traffic_model', 'std3_47.bills_head_model', 'std3_47.bills_item_model',
 										'std3_47.coupons_model', 'std3_47.promos_model', 'std3_47.promo_types_model']);
+									
+
+TRUNCATE TABLE std3_47.traffic;									
+select
+	partitiontablename,
+	partitionrangestart,
+	partitionrangeend
+from pg_partitions
+where
+	tablename = 'traffic'
+	and schemaname = 'std3_47'
+order by partitionrangestart;	
+
