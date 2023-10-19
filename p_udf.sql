@@ -90,7 +90,183 @@ END;
 
 $$
 EXECUTE ON ANY;
+--
+CREATE OR REPLACE FUNCTION std3_47.f_p_load_delta_partition_merge(p_table TEXT, p_partition_key TEXT, p_start_date timestamp, p_end_date timestamp, p_pxf_table_1 TEXT, p_pxf_table_2 TEXT, p_user TEXT, p_pass TEXT)
+	RETURNS int4
+	LANGUAGE plpgsql
+	VOLATILE
+AS $$
 
+DECLARE
+	v_ext_table_1 	TEXT;
+	v_ext_table_2 	TEXT;
+	v_temp_table 	TEXT;
+	v_sql 			TEXT;
+	v_pxf 			TEXT;
+	v_result 		int;
+	v_dist_key 		TEXT;
+	v_params 		TEXT;
+	v_where 		TEXT;
+	v_where_join 	TEXT;
+	v_load_interval interval;
+	v_start_date 	date;
+	v_end_date 		date;
+	v_table_oid 	int4;
+	v_cnt 			int8;
+	v_iterDate		timestamp;
+	v_date_format 	TEXT := 'DD.MM.YYYY';
+	v_params_ext_1	TEXT;
+	v_params_ext_2	TEXT;
+	v_params_temp	TEXT;
+	v_join_on		TEXT;
+	v_error			TEXT;
+	v_min			TEXT;
+	v_max			TEXT;
+BEGIN
+	PERFORM std3_47.f_create_date_partitions(p_table, p_end_date);
+
+	v_join_on = 'billnum';
+
+	v_params_ext_1 = 'billnum int8 NULL,
+					billitem int8 NULL,
+					material int8 NULL,
+					netval numeric(17, 2) NULL,
+					tax numeric(17, 2) NULL,
+					qty int8 NULL,
+					rpa_sat numeric(17, 2) NULL';
+				
+	v_params_ext_2 = 'billnum int8 NULL,
+					plant bpchar(4) NULL,
+					calday date NULL';
+	
+	v_params_temp = 'ext_1.billnum
+					, billitem 
+					, material 
+					, plant
+					, calday
+					, to_number(calday::text, ''999999D'') "calmonth"
+					, rpa_sat
+					, qty
+					, netval 
+					, tax';
+
+	v_ext_table_1 = std3_47.f_unify_name(p_table)||'_pr_ext_1';
+	v_ext_table_2 = std3_47.f_unify_name(p_table)||'_pr_ext_2';
+	v_temp_table = std3_47.f_unify_name(p_table)||'_tmp';
+
+	v_result = 0;
+
+	SELECT c.oid INTO v_table_oid
+	FROM pg_class AS c INNER JOIN pg_namespace as n on c.relnamespace = n.oid
+	WHERE n.nspname||'.'||c.relname = p_table
+	LIMIT 1;
+	
+	IF v_table_oid = 0 OR v_table_oid IS NULL THEN
+		v_dist_key = 'DISTRIBUTED RANDOMLY';
+	ELSE
+		v_dist_key = pg_get_table_distributedby(v_table_oid);
+	END IF;
+	
+	SELECT COALESCE('WITH('||array_to_string(reloptions, ', ')||')','')
+	FROM pg_class 
+	INTO v_params
+	WHERE oid = p_table::regclass;
+
+	RAISE NOTICE 'Params: %', v_params;
+
+	v_load_interval = '1 month'::interval;
+	v_start_date := date_trunc('month', p_start_date);
+	v_end_date := date_trunc('month', p_end_date) + v_load_interval;
+
+	v_pxf = 'pxf://'||p_pxf_table_1||'?PROFILE=JDBC&JDBC_DRIVER=org.postgresql.Driver&DB_URL=jdbc:postgresql://192.168.214.212:5432/postgres&USER='||p_user||'&PASS='||p_pass;
+			
+	RAISE NOTICE 'PXF connection string: %', v_pxf;
+	
+	EXECUTE 'DROP EXTERNAL TABLE IF EXISTS '||v_ext_table_1;
+
+	v_sql = 'CREATE EXTERNAL TABLE '||v_ext_table_1||'('||v_params_ext_1||')
+			 LOCATION ('''||v_pxf||'''
+			 ) ON ALL
+			 FORMAT ''CUSTOM'' (FORMATTER=''pxfwritable_import'')
+			 ENCODING ''UTF8''';
+			
+	RAISE NOTICE 'External table is: %', v_sql;
+
+	EXECUTE v_sql;
+
+	RAISE NOTICE 'Ext_tab_1 created successfully';
+
+	v_pxf = 'pxf://'||p_pxf_table_2||'?PROFILE=JDBC&JDBC_DRIVER=org.postgresql.Driver&DB_URL=jdbc:postgresql://192.168.214.212:5432/postgres&USER='||p_user||'&PASS='||p_pass;
+	
+	EXECUTE 'DROP EXTERNAL TABLE IF EXISTS '||v_ext_table_2;
+
+	v_sql = 'CREATE EXTERNAL TABLE '||v_ext_table_2||'('||v_params_ext_2||')
+			 LOCATION ('''||v_pxf||'''
+			 ) ON ALL
+			 FORMAT ''CUSTOM'' (FORMATTER=''pxfwritable_import'')
+			 ENCODING ''UTF8''';
+			
+	RAISE NOTICE 'External table is: %', v_sql;
+
+	EXECUTE v_sql;
+
+	RAISE NOTICE 'Ext_tab_2 created successfully';
+
+	LOOP
+		v_iterDate = v_start_date + v_load_interval;
+	
+		EXIT WHEN v_iterDate > v_end_date;
+
+		v_where = p_partition_key||' >= '''||v_start_date||'''::date AND '||p_partition_key||' < '''||v_iterDate||'''::date';
+	
+		EXECUTE 'SELECT MIN('||v_join_on||')::text, MAX('||v_join_on||')::text
+									FROM '||v_ext_table_2||'
+									WHERE '||v_where INTO v_min, v_max;
+																
+		v_where_join = v_join_on||' BETWEEN '||v_min||'::int AND '||v_max||'::int';
+	
+		v_sql := 'DROP TABLE IF EXISTS '||v_temp_table||';
+				  CREATE TABLE '||v_temp_table||' (LIKE '||p_table||') '||v_params||' '||v_dist_key||';';
+				 
+		RAISE NOTICE 'Temp table is: %', v_sql;
+	
+		EXECUTE v_sql;
+	
+		RAISE NOTICE 'Temp_tab created successfully';
+	
+		v_sql = 'INSERT INTO '||v_temp_table||'
+				SELECT '||v_params_temp||'
+			 	FROM (SELECT * FROM '||v_ext_table_1||' b WHERE '||v_where_join||') ext_1
+				JOIN (SELECT * FROM '||v_ext_table_2||' b WHERE '||v_where||') ext_2 
+				ON ext_1.'||v_join_on||'= ext_2.'||v_join_on;
+		
+		RAISE NOTICE 'Temp table insert: %', v_sql;
+		
+		EXECUTE v_sql;
+		
+		GET DIAGNOSTICS v_cnt = row_count;
+	
+		RAISE NOTICE 'INSERTED ROWS: %', v_cnt;
+	
+		v_sql = 'ALTER TABLE '||p_table||' EXCHANGE PARTITION FOR (DATE '''||v_start_date||''') WITH TABLE '|| v_temp_table ||' WITH VALIDATION';
+		
+		RAISE NOTICE 'EXCHANGE PARTITION SCRIPT: %', v_sql;
+		
+		EXECUTE v_sql;
+	
+		RAISE NOTICE 'ALTER PART OK for % - %',v_start_date, v_iterDate;
+		
+		v_result = v_result + v_cnt;
+		v_start_date = v_iterDate;
+	END LOOP;
+
+	v_sql := 'DROP TABLE IF EXISTS '|| v_temp_table ||'';
+	EXECUTE v_sql;
+
+	RETURN v_result;
+END;
+$$
+EXECUTE ON ANY;
 --
 CREATE OR REPLACE FUNCTION std3_47.f_p_load_delta_partition(p_table text, p_partition_key text, p_start_date timestamp, p_end_date timestamp, p_conversion bool DEFAULT false, p_ext_tool text DEFAULT 'pxf'::text, p_ext_table text DEFAULT NULL::text, p_gpf_filename text DEFAULT NULL::text, p_pxf_user text DEFAULT 'intern'::text, p_pxf_pass text DEFAULT 'intern'::text)
 	RETURNS int4
@@ -527,6 +703,8 @@ SELECT std3_47.f_p_load_delta_partition('std3_47.bills_head', '"calday"', '2020-
 
 SELECT std3_47.f_load_simple_upsert('gp.bills_item', 'std3_47.bills_item', '"billnum"', 'intern', 'intern');
 
+SELECT std3_47.f_p_load_delta_partition_merge('std3_47.bills', '"calday"', '2021-01-01', '2021-02-28', 'gp.bills_item', 'gp.bills_head', 'intern', 'intern');
+
 -- Create enum
 CREATE TYPE selection_mode AS ENUM ('daily', 'day_interval', 'monthly', 'month_interval');
 
@@ -536,8 +714,20 @@ DROP TYPE selection_mode;
 SELECT std3_47.f_p_build_report_mart('20210101', '20210228', 2, ARRAY['month_interval'::selection_mode, 'monthly'::selection_mode]);
 SELECT std3_47.f_p_build_report_mart('20210101', '20210105', 4, ARRAY['day_interval'::selection_mode, 'daily'::selection_mode]);
 
+SELECT 'DROP TABLE '||TABLE_NAME||'' 
+FROM INFORMATION_SCHEMA.TABLES 
+WHERE TABLE_NAME LIKE 'report%';
 
+TRUNCATE TABLE promos;
+TRUNCATE TABLE promo_types;
+TRUNCATE TABLE stores;
+TRUNCATE TABLE traffic;
+TRUNCATE TABLE coupons;
+TRUNCATE TABLE bills_head;
+TRUNCATE TABLE bills_item;
+TRUNCATE TABLE bills;
 
+SELECT count(1) FROM traffic;
 
 
 

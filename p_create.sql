@@ -53,6 +53,33 @@ PARTITION BY RANGE("calday")
 	every (interval '1 month')
 );
 
+--
+CREATE TABLE std3_47.bills (
+	billnum int8 NULL,
+	billitem int8 NULL,
+	material int8 NULL,
+	plant text NULL,
+	calday date NULL,
+	calmonth TEXT NULL,
+	rpa_sat numeric(17, 2) NULL,
+	qty int8 NULL,
+	netval numeric(17, 2) NULL,
+	tax numeric(17, 2) NULL
+)
+WITH (
+	appendonly=true,
+	orientation=column,
+	compresstype=zstd,
+	compresslevel=1
+)
+DISTRIBUTED BY (billnum, billitem)
+PARTITION BY RANGE("calday")
+(
+	START (date '2020-11-01') inclusive
+	END (date '2021-03-01') exclusive
+	EVERY (INTERVAL '1 month')
+);
+
 -- bills_item
 CREATE TABLE std3_47.bills_item (
 	billnum int8 NULL,
@@ -86,7 +113,13 @@ WITH (
 	compresstype=zstd,
 	compresslevel=1
 )
-DISTRIBUTED RANDOMLY;
+DISTRIBUTED RANDOMLY
+PARTITION BY RANGE("date")
+(
+	START (date '2021-01-01') inclusive
+	END (date '2021-03-01') exclusive
+	EVERY (INTERVAL '1 month')
+);
 
 -- promos
 CREATE TABLE std3_47.promos (
