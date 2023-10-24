@@ -91,12 +91,11 @@ END;
 $$
 EXECUTE ON ANY;
 --
-CREATE OR REPLACE FUNCTION std3_47.f_p_load_delta_partition_merge(p_table TEXT, p_partition_key TEXT, p_start_date timestamp, p_end_date timestamp, p_pxf_table_1 TEXT, p_pxf_table_2 TEXT, p_user TEXT, p_pass TEXT)
+CREATE OR REPLACE FUNCTION std3_47.f_p_load_delta_partition_merge(p_table text, p_partition_key text, p_start_date timestamp, p_end_date timestamp, p_pxf_table_1 text, p_pxf_table_2 text, p_user text, p_pass text)
 	RETURNS int4
 	LANGUAGE plpgsql
 	VOLATILE
-AS $$
-
+AS $$	
 DECLARE
 	v_ext_table_1 	TEXT;
 	v_ext_table_2 	TEXT;
@@ -123,32 +122,32 @@ DECLARE
 	v_min			TEXT;
 	v_max			TEXT;
 BEGIN
-	PERFORM std3_47.f_create_date_partitions(p_table, p_end_date);
+	PERFORM std3_47.f_p_create_date_partitions(p_table, p_end_date);
 
 	v_join_on = 'billnum';
 
-	v_params_ext_1 = 'billnum int8 NULL,
-					billitem int8 NULL,
-					material int8 NULL,
-					netval numeric(17, 2) NULL,
-					tax numeric(17, 2) NULL,
-					qty int8 NULL,
-					rpa_sat numeric(17, 2) NULL';
+	v_params_ext_1 = 'billnum int8,
+					billitem int8,
+					material int8,
+					netval numeric(17, 2),
+					tax numeric(17, 2),
+					qty int8,
+					rpa_sat numeric(17, 2)';
 				
-	v_params_ext_2 = 'billnum int8 NULL,
-					plant bpchar(4) NULL,
-					calday date NULL';
+	v_params_ext_2 = 'billnum int8,
+					plant bpchar(4),
+					calday date';
 	
-	v_params_temp = 'ext_1.billnum
-					, billitem 
-					, material 
-					, plant
-					, calday
-					, to_number(calday::text, ''999999D'') "calmonth"
-					, rpa_sat
-					, qty
-					, netval 
-					, tax';
+	v_params_temp = 'ext_1.billnum, 
+					billitem,
+					material,
+					plant,
+					calday,
+					to_char(calday, ''YYYYMM'') "calmonth",
+					rpa_sat,
+					qty,
+					netval, 
+					tax';
 
 	v_ext_table_1 = std3_47.f_unify_name(p_table)||'_pr_ext_1';
 	v_ext_table_2 = std3_47.f_unify_name(p_table)||'_pr_ext_2';
@@ -267,14 +266,13 @@ BEGIN
 END;
 $$
 EXECUTE ON ANY;
+
 --
 CREATE OR REPLACE FUNCTION std3_47.f_p_load_delta_partition(p_table text, p_partition_key text, p_start_date timestamp, p_end_date timestamp, p_conversion bool DEFAULT false, p_ext_tool text DEFAULT 'pxf'::text, p_ext_table text DEFAULT NULL::text, p_gpf_filename text DEFAULT NULL::text, p_pxf_user text DEFAULT 'intern'::text, p_pxf_pass text DEFAULT 'intern'::text)
 	RETURNS int4
 	LANGUAGE plpgsql
 	VOLATILE
 AS $$
-	
-
 DECLARE
 	v_ext_table TEXT;
 	v_temp_table TEXT;
@@ -293,7 +291,7 @@ DECLARE
 	v_cnt int8;
 	v_i_cnt int8;
 BEGIN
-	v_ext_table = std3_47.f_unify_name(p_table)||'pr_ext';
+	v_ext_table = std3_47.f_unify_name(p_table)||'_pr_ext';
 	v_temp_table = std3_47.f_unify_name(p_table)||'_tmp';
 
 	PERFORM std3_47.f_p_create_date_partitions(p_table_name := p_table, p_partition_value := p_end_date);
@@ -378,7 +376,7 @@ BEGIN
 	
 		GET DIAGNOSTICS v_i_cnt := ROW_COUNT;
 		v_cnt := v_cnt + v_i_cnt;
-		RAISE NOTICE 'INSERTED ROWS: %', v_cnt;
+		RAISE NOTICE 'INSERTED ROWS: %', v_i_cnt;
 		v_sql = 'ALTER TABLE '||p_table||' EXCHANGE PARTITION FOR (DATE '''||v_start_date||''') WITH TABLE '|| v_temp_table ||' WITH VALIDATION';
 		
 		RAISE NOTICE 'EXCHANGE PARTITION SCRIPT: %', v_sql;
@@ -394,57 +392,15 @@ BEGIN
 END;
 $$
 EXECUTE ON ANY;
-
 --
 
 --
-CREATE OR REPLACE FUNCTION std3_47.f_p_create_date_partitions(p_table_name TEXT, p_partition_value timestamp)
-	RETURNS int8
-	LANGUAGE plpgsql
-	VOLATILE
-AS $$
-DECLARE
-	v_cnt_partitions int;
-	v_table_name TEXT;
-	v_partition_end_sql TEXT;
-	v_partition_end timestamp;
-	v_interval INTERVAL;
-	v_ts_format TEXT := 'YYYY-MM-DD';
-	v_cnt int4;
-BEGIN
-	v_table_name = std3_47.f_unify_name(p_name := p_table_name);
-
-	SELECT count(*) INTO v_cnt_partitions FROM pg_partition p WHERE p.schemaname||'.'||p.tablename = lower(v_table_name);
-	v_cnt := 0;
-	IF v_cnt_partitions > 1 THEN
-		LOOP
-			SELECT partitionrangeend INTO v_partition_end_sql
-				FROM (
-					SELECT p.*, RANK() OVER (ORDER BY partitionrank DESC) rnk FROM pg_partition p
-					WHERE p.partitionrank IS NOT NULL AND p.schemaname||'.'||p.tablename = lower(v_table_name)
-					) q
-				WHERE rnk = 1;
-
-			EXECUTE 'SELECT '||v_partition_end_sql INTO v_partition_end;
-			EXIT WHEN v_partition_end > p_partition_value;
-			v_interval := '1 month'::INTERVAL;
-			v_cnt := v_cnt + 1;
-			EXECUTE 'ALTER TABLE '||v_table_name||' SPLIT DEFAULT PARTITION
-					START ('||v_partition_end_sql||') END ('''||to_char(v_partition_end+v_interval, v_ts_format)||'''::timestamp)'; 
-		END LOOP;
-	END IF;
-	RETURN v_cnt;
-END;
-$$
-EXECUTE ON ANY;
-
-CREATE OR REPLACE FUNCTION std3_47.f_p_create_date_partitions(p_table_name text, p_partition_value_start timestamp, p_partition_value_end timestamp)
+CREATE OR REPLACE FUNCTION std3_47.f_p_create_date_partitions(p_table_name text, p_partition_value timestamp)
 	RETURNS int8
 	LANGUAGE plpgsql
 	SECURITY DEFINER
 	VOLATILE
-AS $$
-	
+AS $$	
 declare
 	v_table_name text;
 	v_cnt int4;
@@ -468,19 +424,19 @@ begin
 		    
 			execute 'select ' || v_partition_end_sql into v_partition_end;
 			
-			exit when p_partition_value_end < v_partition_end;
+			exit when p_partition_value < v_partition_end;
 		    v_interval := '1 month'::interval;
 		    v_cnt := v_cnt + 1;
 			execute 'alter table ' || v_table_name || ' split default partition
 					 start (''' || v_partition_end || '''::timestamp) end (''' || to_char(v_partition_end + v_interval, 'YYYY-MM-DD') || '''::timestamp)';
 			
 		end loop;
-	ELSE
-		execute 'alter table ' || v_table_name || ' add partition
-				 start (''' || p_partition_value_start || '''::timestamp) end (''' || to_char(p_partition_value_end, 'YYYY-MM-DD') || '''::timestamp)';		
 	END IF;
 	return v_cnt;
 end;
+$$
+EXECUTE ON ANY;
+
 --
 CREATE OR REPLACE FUNCTION std3_47.f_p_build_report_mart(p_start_date text, p_end_date text, p_load_interval int4 DEFAULT 2, p_selection_modes std3_47."_selection_mode" DEFAULT ARRAY['month_interval'::selection_mode])
 	RETURNS int4
@@ -555,8 +511,8 @@ BEGIN
 				v_load_interval = p_load_interval * INTERVAL '1 day';
 				v_current_format = 'YYYYMMDD';
 	            v_start_date := to_date(p_start_date, 'YYYYMMDD');
-	            v_end_date := v_start_date + (v_load_interval + INTERVAL '1 day');
-				v_table_name := 'std3_47.report_'||p_start_date||'_'||v_end_date;
+	            v_end_date := v_start_date + v_load_interval;
+				v_table_name := 'std3_47.report_'||to_char(v_start_date, v_current_format)||'_'||to_char(v_end_date, v_current_format);
 				v_intervals_num := 1;
 			WHEN 'monthly' THEN
 				v_load_interval = INTERVAL '1 month';
@@ -564,7 +520,7 @@ BEGIN
 	            v_start_date := to_date(p_start_date, 'YYYYMMDD');
 	            v_end_date := to_date(p_end_date, 'YYYYMMDD');
 	           	v_table_name := 'std3_47.report_'||to_char(v_start_date, v_current_format);
-	           	v_intervals_num := floor(EXTRACT(epoch FROM age(v_end_date, v_start_date)) / EXTRACT(epoch FROM v_load_interval));
+	           	v_intervals_num := floor(EXTRACT(epoch FROM age(v_end_date + INTERVAL '1 day', v_start_date)) / EXTRACT(epoch FROM v_load_interval));
 			WHEN 'month_interval' THEN
 				v_load_interval = p_load_interval * INTERVAL '1 month';
 				v_current_format = 'YYYYMM';
@@ -578,12 +534,12 @@ BEGIN
 							 					 p_location := 'Report');
 				RAISE EXCEPTION 'Invalid value detected in p_selection_modes';
 		END CASE;
-	
-		EXECUTE 'DROP TABLE IF EXISTS '||v_table_name;  
 		
 	    FOR i IN 1..v_intervals_num LOOP
 			v_iter_date := v_start_date + i * v_load_interval;
 		
+			EXECUTE 'DROP TABLE IF EXISTS '||v_table_name;  
+			
 			v_sql = 'CREATE TABLE '||v_table_name||' (plant text, txt text, turnover int8, coupon_discount numeric(17, 2), turnover_with_discount numeric(17, 2),
 					 material_qty int8, bills_qty int8, traffic int8, matdisc_qty int8, matdisc_percent numeric(17, 1),
 					 avg_mat_qty numeric(17, 2), conversion_rate numeric(17, 2), avg_bill numeric(17, 1), avg_profit numeric(17, 2))
@@ -607,7 +563,7 @@ BEGIN
 								END AS coupon_discount
 							FROM std3_47.coupons c
 							JOIN std3_47.promos p ON (p.material = c.material and p.promo_id = c.promo_id)
-							JOIN std3_47.bills_item bi ON (bi.billnum = c.billnum and c.material = bi.material)
+							JOIN std3_47.bills bi ON (bi.billnum = c.billnum and c.material = bi.material)
 							WHERE c."date" >= '''||v_start_date||'''::date AND c."date" < '''||v_iter_date||'''::date),
 						sum_discount AS (
 							SELECT cd.plant, sum(cd.coupon_discount) AS sum_disc, count(cd.material) AS matdisc_qty
@@ -619,11 +575,10 @@ BEGIN
 							WHERE t."date" >= '''||v_start_date||'''::date AND t."date" < '''||v_iter_date||'''::date
 							GROUP BY t.plant),
 						sum_turnover AS (
-							SELECT bh.plant, sum(bi.rpa_sat) AS turnover, sum(bi.qty) AS quant, count(DISTINCT bi.billnum) AS bill_qty
-							FROM std3_47.bills_item bi
-							JOIN std3_47.bills_head bh ON bh.billnum = bi.billnum
-							WHERE bh.calday >= '''||v_start_date||'''::date AND bh.calday < '''||v_iter_date||'''::date
-							GROUP BY bh.plant)
+							SELECT bi.plant, sum(bi.rpa_sat) AS turnover, sum(bi.qty) AS quant, count(DISTINCT bi.billnum) AS bill_qty
+							FROM std3_47.bills bi
+							WHERE bi.calday >= '''||v_start_date||'''::date AND bi.calday < '''||v_iter_date||'''::date
+							GROUP BY bi.plant)
 					INSERT INTO '||v_table_name||' (plant, txt, turnover, coupon_discount, turnover_with_discount, material_qty, bills_qty, traffic,
 												 	matdisc_qty, matdisc_percent, avg_mat_qty, conversion_rate, avg_bill, avg_profit)
 					SELECT s.plant, s.txt, COALESCE(st.turnover, 0), COALESCE(sd.sum_disc, 0), COALESCE((st.turnover - sd.sum_disc), 0) AS turnover_with_disc,
@@ -670,6 +625,9 @@ BEGIN
 									 p_location := 'Report');
 	RETURN v_cnt;
 END;
+
+
+
 $$
 EXECUTE ON ANY;
 
