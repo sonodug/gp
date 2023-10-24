@@ -2,8 +2,10 @@ from airflow import DAG
 from datetime import datetime, timedelta, date
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.operators.python_operator import PythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.models import Variable
+from clickhouse_driver import Client
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
@@ -13,7 +15,6 @@ DB_SCHEMA = 'std3_47'
 
 # Clickhouse db params
 CH_HOST_MAIN = "192.168.214.209"
-CH_COPY_HOSTS = ["192.168.214.210", "192.168.214.211"]
 CH_PORT = "9000"
 CH_LOGIN = "std3_47"
 CH_PASS = "5ZnVsbq48zvjW7bQ"
@@ -85,24 +86,18 @@ MART_PROC_LOAD = "f_p_build_report_mart"
 MART_LOAD_QUERY = f"select {DB_SCHEMA}.{MART_PROC_LOAD}(%(start_date)s, %(end_date)s, %(load_interval)s, ARRAY[%(smode1)s::selection_mode, %(smode2)s::selection_mode]);"
 
 # Clickhouse dag workflow
-CREATE_MART_EXT = ""
-CREATE_MART = ""
-CREATE_COPY_REPORT = ""
-CREATE_COPY_REPORT_DISTR = ""
-
 # ext -> copy -> distr -> insert in distr
 CH_TABS = []
-CH_QUERIES = []
 
 
-def create_ext_query(from_table, table):
-    return f"""CREATE TABLE {table}_ext
+def create_ext_query(table):
+    client.execute(f"""CREATE TABLE {table}_external
                      (
                         `plant` String,
                         `txt` String,
                         `turnover` Int32,
                         `coupon_discount` Decimal(17, 2),
-                        `turnover_with_disc` Decimal(17, 2),
+                        `turnover_with_discount` Decimal(17, 2),
                         `material_qty` Int32,
                         `bills_qty` Int32,
                         `traffic` Int32,
@@ -113,17 +108,18 @@ def create_ext_query(from_table, table):
                         `avg_bill` Decimal(7, 1),
                         `avg_profit` Decimal(7, 1)
                     )
-                    ENGINE = PostgreSQL('192.168.214.203:5432','adb',{from_table}, {CH_DB}, {password}, {CH_DB})"""
+                    ENGINE = PostgreSQL('192.168.214.203:5432','adb',{table}, {CH_DB}, {CH_PASS}, {CH_DB})""")
 
 
 def create_copy_query(table):
-    return f"""CREATE TABLE {CH_DB}.{table} ON CLUSTER default_cluster
+    client.execute(f"""CREATE TABLE {CH_DB}.{table}
                         (
+                            `plant_id` Int32,
                             `plant` String,
                             `txt` String,
                             `turnover` Int32,
                             `coupon_discount` Decimal(17, 2),
-                            `turnover_with_disc` Decimal(17, 2),
+                            `turnover_with_discount` Decimal(17, 2),
                             `material_qty` Int32,
                             `bills_qty` Int32,
                             `traffic` Int32,
@@ -134,18 +130,20 @@ def create_copy_query(table):
                             `avg_bill` Decimal(7, 1),
                             `avg_profit` Decimal(7, 1)
                         )
-                        ENGINE = ReplicatedMergeTree('/{CH_DB}/{table}/{{shard}}', '{{replica}}') 
-                        ORDER BY store_id"""
+                        ENGINE = ReplicatedMergeTree('/project/{CH_DB}/{table}/{{shard}}', '{{replica}}') 
+                        ORDER BY plant""")
 
 
 def create_distr_query(table):
-    return f"""CREATE TABLE {CH_DB}.{table}_distr
+    distr_table = f"{table}_distr"
+    client.execute(f"""CREATE TABLE {CH_DB}.{distr_table}
                         (
+                            `plant_id` Int32,
                             `plant` String,
                             `txt` String,
                             `turnover` Int32,
                             `coupon_discount` Decimal(17, 2),
-                            `turnover_with_disc` Decimal(17, 2),
+                            `turnover_with_discount` Decimal(17, 2),
                             `material_qty` Int32,
                             `bills_qty` Int32,
                             `traffic` Int32,
@@ -156,13 +154,7 @@ def create_distr_query(table):
                             `avg_bill` Decimal(7, 1),
                             `avg_profit` Decimal(7, 1)
                         )
-                        ENGINE = Distributed('default_cluster', {CH_DB}, '{table}', store_id)"""
-
-
-def create_query(from_table, to_table):
-    CH_QUERIES.append(create_ext_query(from_table, to_table))
-    CH_QUERIES.append(create_copy_query(to_table))
-    CH_QUERIES.append(create_distr_query(to_table))
+                        ENGINE = Distributed('default_cluster', {CH_DB}, '{table}', plant_id)""")
 
 
 def generate_table_names(start_date, end_date, load_interval, prefix, is_monthly):
@@ -187,14 +179,16 @@ def generate_table_names(start_date, end_date, load_interval, prefix, is_monthly
         CH_TABS.append(table_name)
 
 
-client = Client(host=CH_HOST, port=CH_PORT, database=CH_DB, user=CH_LOGIN, password=CH_PASS)
-
-
 def load_tables():
     for i in range(len(CH_TABS)):
-        client.execute(f"TRUNCATE {CH_SCHEMA}.{CH_TABS[i]} ON CLUSTER {CH_CLUSTER}")
-        client.execute(f"INSERT INTO {CH_SCHEMA}.{CH_TABS[i]} SELECT * FROM {CH_SCHEMA}.{CH_TABS[i]}_ext")
+        create_ext_query(CH_TABS[i])
+        create_copy_query(CH_TABS[i])
+        create_distr_query(CH_TABS[i])
+        client.execute(
+            f"INSERT INTO {CH_SCHEMA}.{CH_TABS[i]}_distr SELECT row_number() OVER (ORDER BY plant) AS plant_id, plant, txt, turnover, coupon_discount, turnover_with_discount, material_qty, bills_qty, traffic, matdisc_qty, matdisc_percent, avg_mat_qty, conversion_rate, avg_bill, avg_profit FROM {CH_SCHEMA}.{CH_TABS[i]}_external")
 
+
+client = Client(host=CH_HOST_MAIN, port=CH_PORT, database=CH_DB, user=CH_LOGIN, password=CH_PASS)
 
 default_args = {
     'depends_on_past': False,
@@ -203,6 +197,9 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(seconds=15),
 }
+
+generate_table_names('20210101', '20210228', 2, 'report', True)
+generate_table_names('20210101', '20210105', 4, 'report', False)
 
 # So far without clickhouse
 with DAG(
@@ -276,8 +273,11 @@ with DAG(
                                                  "smode2": f"{MART_SELECTION_MODES_DAY[1]}"}
                                      )
 
-    # task_ch via taskgroup and python operator (cycle) есть CH_TABS = [], пробежать по ним и перекинуть исходные таблицы = итоговые
+    task_ch = PythonOperator(
+        task_id='task_ch',
+        python_callable=load_tables
+    )
 
     task_end = DummyOperator(task_id="dag_end")
 
-    task_start >> task1 >> task2 >> task3 >> task4 >> task_mart_month >> task_mart_day >> task_end
+    task_start >> task1 >> task2 >> task3 >> task4 >> task_mart_month >> task_mart_day >> task_ch >> task_end
